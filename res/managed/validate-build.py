@@ -37,9 +37,10 @@ def endpoint(name, value, *, https):
 
 
 def main():
-    manifest = tomllib.loads(Path("Cargo.toml").read_text(encoding="utf-8"))
-    if manifest["package"]["version"] != VERSION:
-        raise SystemExit(f"Expected pinned RustDesk version {VERSION}")
+    for manifest_path in ("Cargo.toml", "libs/portable/Cargo.toml"):
+        manifest = tomllib.loads(Path(manifest_path).read_text(encoding="utf-8"))
+        if manifest["package"]["version"] != VERSION:
+            raise SystemExit(f"Expected pinned version {VERSION} in {manifest_path}")
     flutter_manifest = Path("flutter/pubspec.yaml").read_text(encoding="utf-8")
     if not re.search(rf"(?m)^version: {re.escape(VERSION)}(?:\+[0-9]+)?$", flutter_manifest):
         raise SystemExit(f"Expected pinned Flutter app version {VERSION}")

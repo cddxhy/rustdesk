@@ -50,7 +50,7 @@ jobs:
       configuration: Release
       platform: x64
       target_version: Windows10
-  msi:
+  exe:
     needs: [bridge, window-helper]
     runs-on: windows-2022
     steps:
@@ -192,33 +192,52 @@ jobs:
           name: topmostwindow-artifacts-x64
           path: "./rustdesk"
 
-      - name: Add MSBuild to PATH
-        uses: microsoft/setup-msbuild@6fb02220983dee41ce7ae257b6f4d8f9bf5ed4ce # v2
-        with:
-          msbuild-architecture: x86
-
-      - name: Build Windows x64 MSI
+      - name: Build Windows x64 EXE installer
+        shell: bash
         run: |
-          Push-Location ./res/msi
-          python preprocess.py --arp -d ../../rustdesk
-          if ($LASTEXITCODE -ne 0) { throw "MSI preprocessing failed" }
-          $versionPattern = 'define Version="' + [regex]::Escape($env:VERSION) + '(?:\.[0-9]+)?"'
-          if (!(Select-String -Path ./Package/Includes.wxi -Pattern $versionPattern -Quiet)) {
-            throw "Installer metadata does not match the pinned RustDesk version"
-          }
-          nuget restore msi.sln
-          if ($LASTEXITCODE -ne 0) { throw "NuGet restore failed" }
-          msbuild msi.sln -p:Configuration=Release -p:Platform=x64 /p:TargetVersion=Windows10
-          if ($LASTEXITCODE -ne 0) { throw "MSI build failed" }
-          $msi = Get-ChildItem ./Package/bin/*/Release/en-us/Package.msi | Select-Object -First 1
-          if (!$msi) { throw "MSI file missing" }
-          Pop-Location
-          New-Item -ItemType Directory -Force ./dist | Out-Null
-          Copy-Item $msi.FullName ./dist/rustdesk-managed-${{ env.VERSION }}-x86_64.msi
+          sed -i '/dpiAware/d' res/manifest.xml
+          pushd ./libs/portable
+          python3 -m pip install -r requirements.txt
+          python3 ./generate.py -f ../../rustdesk/ -e rustdesk.exe -t x86_64-pc-windows-msvc
+          popd
+          mkdir -p ./dist
+          mv ./target/x86_64-pc-windows-msvc/release/rustdesk-portable-packer.exe "./dist/rustdesk-managed-${VERSION}-x86_64-install.exe"
 
-      - name: Upload Windows x64 installation package
+      - name: Verify Windows x64 installation
+        run: |
+          $installer = (Resolve-Path "dist/rustdesk-managed-${env:VERSION}-x86_64-install.exe").Path
+          $reader = [IO.BinaryReader]::new([IO.File]::OpenRead($installer))
+          try {
+            if ($reader.ReadUInt16() -ne 0x5a4d) { throw 'Installer is missing the DOS header' }
+            $reader.BaseStream.Position = 0x3c
+            $reader.BaseStream.Position = $reader.ReadInt32()
+            if ($reader.ReadUInt32() -ne 0x4550 -or $reader.ReadUInt16() -ne 0x8664) {
+              throw 'Installer is not a Windows x64 executable'
+            }
+          } finally {
+            $reader.Dispose()
+          }
+
+          Start-Process -FilePath $installer -ArgumentList '--silent-install'
+          $uninstallKey = 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\RustDesk'
+          $deadline = [DateTime]::UtcNow.AddMinutes(3)
+          do {
+            $registered = Get-ItemProperty -LiteralPath $uninstallKey -ErrorAction SilentlyContinue
+            $service = Get-Service -Name RustDesk -ErrorAction SilentlyContinue
+            if ($registered.InstallLocation -and $service.Status -eq 'Running') { break }
+            Start-Sleep -Seconds 2
+          } while ([DateTime]::UtcNow -lt $deadline)
+          if ($registered.DisplayVersion -ne $env:VERSION -or $service.Status -ne 'Running') {
+            throw 'Pinned RustDesk version or running service was not found after installation'
+          }
+          $installedScript = Join-Path $registered.InstallLocation 'Enroll-ManagedRustDesk.ps1'
+          if ((Get-FileHash $installedScript).Hash -ne (Get-FileHash res/managed/Enroll-ManagedRustDesk.ps1).Hash) {
+            throw 'The installed enrollment script does not match the payload'
+          }
+
+      - name: Upload Windows x64 EXE installer
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: rustdesk-managed-${{ env.VERSION }}-windows-x64
-          path: dist/rustdesk-managed-${{ env.VERSION }}-x86_64.msi
+          name: rustdesk-managed-${{ env.VERSION }}-windows-x64-exe
+          path: dist/rustdesk-managed-${{ env.VERSION }}-x86_64-install.exe
           if-no-files-found: error

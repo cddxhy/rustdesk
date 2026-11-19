@@ -15,13 +15,13 @@
 | `MANAGEMENT_API_ENCRYPTION_PUBLIC_KEY` | libsodium `crypto_box` 公钥，32 字节原始数据的标准 Base64 |
 | `MANAGEMENT_API_ENCRYPTION_KEY_ID` | 对应解密密钥的标识，例如 `device-enrollment-v1` |
 
-首版只上传 MSI artifact，Actions Secrets 无需添加。API 解密私钥由服务器端的密钥存储管理。RustDesk 服务端公钥与管理 API 加密公钥分别使用。部署令牌和设备密码在部署及运行时产生。
+构建只上传 EXE 安装程序，Actions Secrets 无需添加。API 解密私钥由服务器端的密钥存储管理。RustDesk 服务端公钥与管理 API 加密公钥分别使用。部署令牌和设备密码在部署及运行时产生。
 
-推送到 `managed-windows` 分支时自动构建。工作流进入默认分支后，也可在 **Actions → Managed RustDesk Windows x64 → Run workflow** 手动触发。构建校验 RustDesk 版本 **1.5.3** 和固定基线 `669cb8ac62aa20d3626395877d7dd0357aec7ed2`，同一次运行编译触发时的 Git 提交。MSI 文件名为 `rustdesk-managed-1.5.3-x86_64.msi`。此 MSI 中的客户端固定使用编译时的服务器配置。受管控制端通过自建服务器按设备 ID 建立连接，仍可使用 NAT 穿透或中继。启动更新检查、自动更新和内置升级入口均关闭。需要升级时由管理员重新打包和部署。
+推送到 `managed-windows` 分支时自动构建。工作流进入默认分支后，也可在 **Actions → Managed RustDesk Windows x64 → Run workflow** 手动触发。构建校验 RustDesk 版本 **1.5.3** 和固定基线 `669cb8ac62aa20d3626395877d7dd0357aec7ed2`，同一次运行编译触发时的 Git 提交。安装程序文件名为 `rustdesk-managed-1.5.3-x86_64-install.exe`。双击时请保留 `-install.exe` 后缀，批量部署可以从管理员终端传入 `--silent-install` 参数。安装后的客户端固定使用编译时的服务器配置。受管控制端通过自建服务器按设备 ID 建立连接，仍可使用 NAT 穿透或中继。启动更新检查、自动更新和内置升级入口均关闭。需要升级时由管理员重新打包和部署。
 
 ## 安装和注册
 
-1. 管理员从受控渠道获取短时、一次性的注册令牌，在被控机安装 MSI 并启动 RustDesk 服务。
+1. 管理员从受控渠道获取短时、一次性的注册令牌，在被控机运行 EXE 安装程序，并确认 RustDesk 服务已启动。如果此前安装了 MSI 版，先在 Windows 的「已安装的应用」中卸载该版本，再使用 EXE 安装。
 2. 从提升权限的 **64 位 Windows PowerShell** 运行安装目录中的 `Enroll-ManagedRustDesk.ps1`，根据提示输入令牌。批量部署时可用 `-EnrollmentTokenFile <路径>` 指定由部署系统保护的 UTF-8 文件，部署方负责删除源文件。令牌允许 `A–Z a–z 0–9 . _ ~ -`，长度 16 至 4096 个字符。
 3. Windows 服务约每 30 秒同步一次。它从 RustDesk 服务进程读取设备 ID，注册设备、上传待生效凭据、设置本机永久密码，再确认激活。失败后会重试。设备注册 ID 和设备令牌在首次请求之前持久化。同一次注册重试复用原来的 ID 和令牌。
 4. 本地状态位于 `%ProgramFiles%\RustDesk-Managed-State`，目录 ACL 只向 SYSTEM 和 Administrators 授予访问权限。注册确认后，状态目录中的注册令牌文件会被删除。轮换确认后，状态中只保留设备身份、当前凭据版本和 RustDesk ID。
@@ -80,7 +80,7 @@
 
 ## 验收
 
-1. 下载 Actions 生成的 MSI，在干净的 Windows x64 测试机上安装。验证连接自建 ID 和 Relay 服务器，检查 RustDesk 版本为 1.5.3，确认关闭内置更新。
+1. 下载 Actions 生成的 EXE 安装程序，在干净的 Windows x64 测试机上安装。验证连接自建 ID 和 Relay 服务器，检查 RustDesk 版本为 1.5.3，确认关闭内置更新。
 2. 注册两台设备并分别分配给两名员工。检查同一设备注册和上报的重试不会生成重复记录，两台设备有不同的永久密码。
 3. 验证员工能从列表一键连接自己的设备，未登录和越权请求被拒绝。分别测试 P2P 和中继，并在被控机重启后复测。
 4. 模拟 API 在设置密码后短暂不可用，再恢复服务，确认客户端重用同一操作，激活前 API 暂停发放。
