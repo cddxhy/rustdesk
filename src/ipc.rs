@@ -376,6 +376,8 @@ pub enum Data {
     Close,
     #[cfg(windows)]
     SAS,
+    #[cfg(all(windows, target_arch = "x86_64"))]
+    ManagedClientStarted,
     UserSid(Option<u32>),
     OnlineStatus(Option<(i64, bool)>),
     Config((String, Option<String>)),
@@ -926,6 +928,10 @@ async fn handle(data: Data, stream: &mut Connection) {
                 allow_err!(stream.send(&Data::Socks(Config::get_socks())).await);
             }
             Some(data) => {
+                #[cfg(all(windows, target_arch = "x86_64"))]
+                if crate::managed_deployment::enabled() {
+                    return;
+                }
                 let _nat = CheckTestNatType::new();
                 if data.proxy.is_empty() {
                     Config::set_socks(None);
@@ -2119,6 +2125,10 @@ pub async fn get_socks() -> Option<config::Socks5Server> {
 
 #[tokio::main(flavor = "current_thread")]
 pub async fn set_socks(value: config::Socks5Server) -> ResultType<()> {
+    #[cfg(all(windows, target_arch = "x86_64"))]
+    if crate::managed_deployment::enabled() {
+        bail!("Network settings are managed");
+    }
     let _nat = CheckTestNatType::new();
     Config::set_socks(if value.proxy.is_empty() {
         None

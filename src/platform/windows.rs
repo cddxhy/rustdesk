@@ -557,6 +557,14 @@ pub fn start_os_service() {
 }
 
 #[cfg(target_arch = "x86_64")]
+pub(crate) fn is_virtualbox_guest() -> bool {
+    RegKey::predef(HKEY_LOCAL_MACHINE)
+        .open_subkey(r"HARDWARE\DESCRIPTION\System\BIOS")
+        .and_then(|bios| bios.get_value::<String, _>("SystemProductName"))
+        .map_or(false, |name| name.trim().eq_ignore_ascii_case("VirtualBox"))
+}
+
+#[cfg(target_arch = "x86_64")]
 pub(crate) fn managed_state_directory() -> ResultType<PathBuf> {
     use installer_handoff::directory;
     use windows::Win32::UI::Shell::FOLDERID_ProgramFiles;
@@ -715,8 +723,10 @@ async fn run_service(_arguments: Vec<OsString>) -> ResultType<()> {
     let mut h_process = launch_server(session_id, true).await.unwrap_or(NULL);
     let mut incoming = ipc::new_listener(crate::POSTFIX_SERVICE).await?;
     #[cfg(target_arch = "x86_64")]
-    let managed_worker = crate::managed_deployment::enabled()
-        .then(|| tokio::spawn(crate::managed_deployment::run()));
+    let managed_worker = crate::managed_deployment::enabled().then(|| {
+        let (opened, receiver) = tokio::sync::watch::channel(());
+        (opened, tokio::spawn(crate::managed_deployment::run(receiver)))
+    });
     let mut stored_usid = None;
     loop {
         let sids: Vec<_> = get_available_sessions(false)
@@ -756,6 +766,12 @@ async fn run_service(_arguments: Vec<OsString>) -> ResultType<()> {
                             }
                             ipc::Data::SAS => {
                                 send_sas();
+                            }
+                            #[cfg(target_arch = "x86_64")]
+                            ipc::Data::ManagedClientStarted => {
+                                if let Some((opened, _)) = &managed_worker {
+                                    opened.send_replace(());
+                                }
                             }
                             ipc::Data::UserSid(usid) => {
                                 if let Some(usid) = usid {
@@ -816,7 +832,7 @@ async fn run_service(_arguments: Vec<OsString>) -> ResultType<()> {
     }
 
     #[cfg(target_arch = "x86_64")]
-    if let Some(worker) = managed_worker {
+    if let Some((_, worker)) = managed_worker {
         worker.abort();
     }
     if !h_process.is_null() {
@@ -835,6 +851,24 @@ async fn run_service(_arguments: Vec<OsString>) -> ResultType<()> {
     })?;
 
     Ok(())
+}
+
+#[cfg(target_arch = "x86_64")]
+pub(crate) fn start_managed_service() -> ResultType<()> {
+    let app_name = crate::get_app_name();
+    match RegKey::predef(HKEY_LOCAL_MACHINE)
+        .open_subkey(format!(r"SYSTEM\CurrentControlSet\Services\{app_name}"))
+    {
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            if install_service() {
+                bail!("Failed to restore the managed service registration");
+            }
+            return Ok(());
+        }
+        _ => {}
+    }
+    let (_, _, _, exe) = get_install_info();
+    run_cmds(service_control_command("start", &exe, false)?, false, "start-service")
 }
 
 async fn launch_server(session_id: DWORD, close_first: bool) -> ResultType<HANDLE> {
@@ -4085,6 +4119,7 @@ fn service_control_command(operation: &str, exe: &str, installed_now: bool) -> R
         "create-service" | "create-service-with-rollback" => get_create_service(exe),
         "remove" => format!("sc stop {app_name}\r\nsc delete {app_name}"),
         "stop" => format!("sc stop {app_name}"),
+        "start" => format!("sc start {app_name}"),
         _ => bail!("Unsupported service operation: {operation}"),
     };
     if legacy.is_empty() || (is_create && Config::get_option("stop-service") == "Y") {

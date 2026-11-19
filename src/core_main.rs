@@ -181,6 +181,14 @@ pub fn core_main() -> Option<CoreMainAction> {
         }
     }
     hbb_common::init_log(false, &log_name);
+    #[cfg(all(windows, target_arch = "x86_64"))]
+    if args.is_empty()
+        && !no_server
+        && crate::managed_deployment::enabled()
+        && crate::platform::is_cur_exe_the_installed()
+    {
+        crate::managed_deployment::on_client_start();
+    }
 
     // linux uni (url) go here.
     #[cfg(all(target_os = "linux", feature = "flutter"))]

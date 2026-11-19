@@ -17,7 +17,7 @@ namespace service_control {
 
 using ServiceHandle = std::unique_ptr<std::remove_pointer_t<SC_HANDLE>,
                                       decltype(&CloseServiceHandle)>;
-constexpr DWORD kStopTimeoutMilliseconds = 30000;
+constexpr DWORD kTransitionTimeoutMilliseconds = 30000;
 constexpr DWORD kPollIntervalMilliseconds = 100;
 
 inline DWORD StopService(SC_HANDLE service) {
@@ -42,7 +42,7 @@ inline DWORD StopService(SC_HANDLE service) {
   // the service has reached SERVICE_STOPPED.
   const ULONGLONG started = GetTickCount64();
   while (status.dwCurrentState != SERVICE_STOPPED) {
-    if (GetTickCount64() - started >= kStopTimeoutMilliseconds) {
+    if (GetTickCount64() - started >= kTransitionTimeoutMilliseconds) {
       return ERROR_TIMEOUT;
     }
     Sleep(kPollIntervalMilliseconds);
@@ -92,6 +92,47 @@ inline DWORD StopRegisteredService(const wchar_t* name) {
       OpenServiceW(manager.get(), name, SERVICE_STOP | SERVICE_QUERY_STATUS),
       CloseServiceHandle);
   return service ? StopService(service.get()) : GetLastError();
+}
+
+inline DWORD StartRegisteredService(const wchar_t* name) {
+  ServiceHandle manager(OpenSCManagerW(nullptr, nullptr, SC_MANAGER_CONNECT),
+                        CloseServiceHandle);
+  if (!manager) {
+    return GetLastError();
+  }
+  ServiceHandle service(
+      OpenServiceW(manager.get(), name, SERVICE_START | SERVICE_QUERY_STATUS),
+      CloseServiceHandle);
+  if (!service) {
+    return GetLastError();
+  }
+  if (!StartServiceW(service.get(), 0, nullptr)) {
+    const DWORD error = GetLastError();
+    if (error != ERROR_SERVICE_ALREADY_RUNNING) {
+      return error;
+    }
+  }
+  const ULONGLONG started = GetTickCount64();
+  for (;;) {
+    SERVICE_STATUS_PROCESS status{};
+    DWORD bytes_needed = 0;
+    if (!QueryServiceStatusEx(service.get(), SC_STATUS_PROCESS_INFO,
+                              reinterpret_cast<BYTE*>(&status), sizeof(status),
+                              &bytes_needed)) {
+      return GetLastError();
+    }
+    if (status.dwCurrentState == SERVICE_RUNNING) {
+      return ERROR_SUCCESS;
+    }
+    if (status.dwCurrentState == SERVICE_STOPPED) {
+      return status.dwWin32ExitCode ? status.dwWin32ExitCode
+                                  : ERROR_SERVICE_NOT_ACTIVE;
+    }
+    if (GetTickCount64() - started >= kTransitionTimeoutMilliseconds) {
+      return ERROR_TIMEOUT;
+    }
+    Sleep(kPollIntervalMilliseconds);
+  }
 }
 
 inline DWORD InstallService(const wchar_t* name, const wchar_t* executable,
@@ -161,6 +202,9 @@ inline DWORD RunCommand(int count, wchar_t** args) {
   }
   if (operation == L"stop" && count == kServiceArgumentCount) {
     return StopRegisteredService(args[3]);
+  }
+  if (operation == L"start" && count == kServiceArgumentCount) {
+    return StartRegisteredService(args[3]);
   }
   return ERROR_BAD_ARGUMENTS;
 }
