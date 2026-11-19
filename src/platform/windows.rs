@@ -695,6 +695,9 @@ async fn run_service(_arguments: Vec<OsString>) -> ResultType<()> {
     log::info!("session id {}", session_id);
     let mut h_process = launch_server(session_id, true).await.unwrap_or(NULL);
     let mut incoming = ipc::new_listener(crate::POSTFIX_SERVICE).await?;
+    #[cfg(target_arch = "x86_64")]
+    let managed_worker = crate::managed_deployment::enabled()
+        .then(|| tokio::spawn(crate::managed_deployment::run()));
     let mut stored_usid = None;
     loop {
         let sids: Vec<_> = get_available_sessions(false)
@@ -793,6 +796,10 @@ async fn run_service(_arguments: Vec<OsString>) -> ResultType<()> {
         }
     }
 
+    #[cfg(target_arch = "x86_64")]
+    if let Some(worker) = managed_worker {
+        worker.abort();
+    }
     if !h_process.is_null() {
         send_close_async("").await.ok();
         unsafe { CloseHandle(h_process) };
@@ -2172,6 +2179,15 @@ pub fn prepare_custom_client_update() -> ResultType<bool> {
 }
 
 pub fn get_license_from_exe_name() -> ResultType<CustomServer> {
+    #[cfg(target_arch = "x86_64")]
+    if crate::managed_deployment::enabled() {
+        return Ok(CustomServer {
+            host: option_env!("RUSTDESK_ID_SERVER").unwrap_or_default().to_owned(),
+            relay: option_env!("RUSTDESK_RELAY_SERVER").unwrap_or_default().to_owned(),
+            key: option_env!("RUSTDESK_SERVER_PUBLIC_KEY").unwrap_or_default().to_owned(),
+            api: String::new(),
+        });
+    }
     let mut exe = std::env::current_exe()?.to_str().unwrap_or("").to_owned();
     // if defined portable appname entry, replace original executable name with it.
     if let Ok(portable_exe) = std::env::var(PORTABLE_APPNAME_RUNTIME_ENV_KEY) {

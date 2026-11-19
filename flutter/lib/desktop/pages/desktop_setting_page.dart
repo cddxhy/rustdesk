@@ -524,6 +524,8 @@ class _GeneralState extends State<_General> {
   Widget other() {
     final incomingOnly = bind.isIncomingOnly();
     final outgoingOnly = bind.isOutgoingOnly();
+    final isManaged =
+        bind.mainGetBuildinOption(key: 'managed-deployment-api').isNotEmpty;
     final showAutoUpdate = (isWindows && bind.mainIsInstalled()) ||
     (isMacOS && bind.mainIsInstalled() && bind.mainIsInstalledDaemon(prompt: false) && !bind.isCustomClient());
     final children = <Widget>[
@@ -593,14 +595,14 @@ class _GeneralState extends State<_General> {
             ),
           ),
       ],
-      if (!isWeb && !bind.isCustomClient())
+      if (!isWeb && !bind.isCustomClient() && !isManaged)
         _OptionCheckBox(
           context,
           'Check for software update on startup',
           kOptionEnableCheckUpdate,
           isServer: false,
         ),
-      if (showAutoUpdate)
+      if (showAutoUpdate && !isManaged)
         _OptionCheckBox(
           context,
           'Auto update',

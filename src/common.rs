@@ -1186,6 +1186,10 @@ fn process_software_update_check_response(bytes: Bytes) -> ResultType<()> {
 // Because the url is always `https://api.rustdesk.com/version/latest`.
 #[tokio::main(flavor = "current_thread")]
 pub async fn do_check_software_update() -> hbb_common::ResultType<()> {
+    #[cfg(all(windows, target_arch = "x86_64"))]
+    if crate::managed_deployment::enabled() {
+        return Ok(());
+    }
     let (request, url) =
         hbb_common::version_check_request(hbb_common::VER_TYPE_RUSTDESK_CLIENT.to_string());
     let proxy_conf = Config::get_socks();
@@ -1277,6 +1281,10 @@ pub fn get_custom_rendezvous_server(custom: String) -> String {
 
 #[inline]
 pub fn get_api_server(api: String, custom: String) -> String {
+    #[cfg(all(windows, target_arch = "x86_64"))]
+    if crate::managed_deployment::enabled() {
+        return String::new();
+    }
     if Config::no_register_device() {
         return "".to_owned();
     }
@@ -2516,6 +2524,11 @@ pub fn rustdesk_interval(i: Interval) -> ThrottledInterval {
 }
 
 pub fn load_custom_client() {
+    #[cfg(all(windows, target_arch = "x86_64"))]
+    if crate::managed_deployment::enabled() {
+        crate::managed_deployment::install_policy();
+        return;
+    }
     #[cfg(debug_assertions)]
     if let Ok(data) = std::fs::read_to_string("./custom.txt") {
         read_custom_client(data.trim());

@@ -125,6 +125,10 @@ pub fn install_me(_options: String, _path: String, _silent: bool, _debug: bool) 
 
 #[inline]
 pub fn update_me(_path: String) {
+    #[cfg(all(windows, target_arch = "x86_64"))]
+    if crate::managed_deployment::enabled() {
+        return;
+    }
     goto_install();
 }
 

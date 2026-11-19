@@ -99,11 +99,19 @@ pub fn update_controlling_session_count(count: usize) {
 
 #[allow(dead_code)]
 pub fn start_auto_update() {
+    #[cfg(all(windows, target_arch = "x86_64"))]
+    if crate::managed_deployment::enabled() {
+        return;
+    }
     let _sender = TX_MSG.lock().unwrap();
 }
 
 #[allow(dead_code)]
 pub fn manually_check_update() -> ResultType<()> {
+    #[cfg(all(windows, target_arch = "x86_64"))]
+    if crate::managed_deployment::enabled() {
+        return Ok(());
+    }
     let sender = TX_MSG.lock().unwrap();
     sender.send(UpdateMsg::CheckUpdate)?;
     Ok(())

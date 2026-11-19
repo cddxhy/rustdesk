@@ -241,6 +241,10 @@ pub fn core_main() -> Option<CoreMainAction> {
                 }
                 return None;
             } else if args[0] == "--update" {
+                #[cfg(target_arch = "x86_64")]
+                if crate::managed_deployment::enabled() {
+                    return None;
+                }
                 // The elevated updater cannot delete its running verified copy.
                 if let Err(err) = platform::schedule_current_verified_update_file_cleanup() {
                     log::warn!("Failed to schedule verified update file cleanup: {}", err);

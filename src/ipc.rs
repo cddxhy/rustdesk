@@ -1748,7 +1748,7 @@ pub async fn get_config(name: &str) -> ResultType<Option<String>> {
     get_config_async(name, 1_000).await
 }
 
-async fn get_config_async(name: &str, ms_timeout: u64) -> ResultType<Option<String>> {
+pub(crate) async fn get_config_async(name: &str, ms_timeout: u64) -> ResultType<Option<String>> {
     let mut c = connect(ms_timeout, "").await?;
     c.send(&Data::Config((name.to_owned(), None))).await?;
     if let Some(Data::Config((name2, value))) = c.next_timeout(ms_timeout).await? {
@@ -1856,7 +1856,7 @@ pub async fn set_permanent_password_with_ack(v: String) -> ResultType<bool> {
     set_permanent_password_with_ack_async(v).await
 }
 
-async fn set_permanent_password_with_ack_async(v: String) -> ResultType<bool> {
+pub(crate) async fn set_permanent_password_with_ack_async(v: String) -> ResultType<bool> {
     // The daemon ACK/NACK is expected quickly since it applies the config in-process.
     let ms_timeout = 1_000;
     let mut c = connect(ms_timeout, "").await?;

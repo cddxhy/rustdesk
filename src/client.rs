@@ -436,6 +436,14 @@ impl Client {
         if config::is_incoming_only() && !is_switch_sides_back(conn_type, &interface).await {
             bail!("Incoming only mode");
         }
+        #[cfg(all(windows, target_arch = "x86_64"))]
+        if crate::managed_deployment::enabled()
+            && (hbb_common::is_ip_str(peer)
+                || hbb_common::is_domain_port_str(peer)
+                || interface.get_lch().read().unwrap().other_server.is_some())
+        {
+            bail!("Use a device ID on the managed RustDesk server");
+        }
         // to-do: remember the port for each peer, so that we can retry easier
         if hbb_common::is_ip_str(peer) {
             return Ok((
@@ -1797,6 +1805,12 @@ impl Client {
         conn_type: ConnType,
         switch_code: &str,
     ) -> ResultType<Stream> {
+        #[cfg(all(windows, target_arch = "x86_64"))]
+        let relay_server = if crate::managed_deployment::enabled() {
+            crate::managed_deployment::relay_server().to_owned()
+        } else {
+            relay_server
+        };
         let mut succeed = false;
         let mut uuid = "".to_owned();
         let mut ipv4 = true;
@@ -1860,6 +1874,12 @@ impl Client {
         conn_type: ConnType,
         ipv4: bool,
     ) -> ResultType<Stream> {
+        #[cfg(all(windows, target_arch = "x86_64"))]
+        let relay_server = if crate::managed_deployment::enabled() {
+            crate::managed_deployment::relay_server().to_owned()
+        } else {
+            relay_server
+        };
         crate::common::check_relay_uuid(&uuid)?;
         // The proxy's address family does not constrain the relay target.
         let relay_server = check_port(relay_server, RELAY_PORT);
