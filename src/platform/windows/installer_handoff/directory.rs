@@ -72,7 +72,7 @@ fn temporary_parent(temporary: &Path) -> ResultType<PathBuf> {
     Ok(parent)
 }
 
-fn has_reparse_parent(path: &Path) -> ResultType<bool> {
+pub(in crate::platform::windows) fn has_reparse_parent(path: &Path) -> ResultType<bool> {
     for parent in path.ancestors() {
         let metadata = fs::symlink_metadata(parent).map_err(|err| {
             anyhow!(
@@ -93,7 +93,7 @@ fn has_reparse_parent(path: &Path) -> ResultType<bool> {
     Ok(false)
 }
 
-fn supports_acls(path: &Path) -> ResultType<bool> {
+pub(in crate::platform::windows) fn supports_acls(path: &Path) -> ResultType<bool> {
     use std::os::windows::{fs::OpenOptionsExt, io::AsRawHandle};
     use windows::Win32::{
         Foundation::HANDLE,
@@ -122,7 +122,7 @@ fn supports_acls(path: &Path) -> ResultType<bool> {
     Ok(flags & winapi::um::winnt::FILE_PERSISTENT_ACLS != 0)
 }
 
-pub(super) fn create(path: &Path) -> ResultType<()> {
+pub(in crate::platform::windows) fn create(path: &Path) -> ResultType<()> {
     let wide_path = wide_string(path_for_cmd_environment(path)?);
     let mut descriptor = PSECURITY_DESCRIPTOR::default();
     // OWNER RIGHTS removes the ordinary creator's implicit WRITE_DAC permission.

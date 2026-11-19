@@ -15,16 +15,17 @@
 | `MANAGEMENT_API_ENCRYPTION_PUBLIC_KEY` | libsodium `crypto_box` 公钥，32 字节原始数据的标准 Base64 |
 | `MANAGEMENT_API_ENCRYPTION_KEY_ID` | 对应解密密钥的标识，例如 `device-enrollment-v1` |
 
-构建只上传 EXE 安装程序，Actions Secrets 无需添加。API 解密私钥由服务器端的密钥存储管理。RustDesk 服务端公钥与管理 API 加密公钥分别使用。部署令牌和设备密码在部署及运行时产生。
+构建只上传 EXE 安装程序，Actions Secrets 无需添加。API 解密私钥由服务器端的密钥存储管理。RustDesk 服务端公钥与管理 API 加密公钥分别使用。设备令牌和设备密码由客户端在首次运行服务时生成。
 
 推送到 `managed-windows` 分支时自动构建。工作流进入默认分支后，也可在 **Actions → Managed RustDesk Windows x64 → Run workflow** 手动触发。构建校验 RustDesk 版本 **1.5.3** 和固定基线 `669cb8ac62aa20d3626395877d7dd0357aec7ed2`，同一次运行编译触发时的 Git 提交。安装程序文件名为 `rustdesk-managed-1.5.3-x86_64-install.exe`。双击时请保留 `-install.exe` 后缀，批量部署可以从管理员终端传入 `--silent-install` 参数。安装后的客户端固定使用编译时的服务器配置。受管控制端通过自建服务器按设备 ID 建立连接，仍可使用 NAT 穿透或中继。启动更新检查、自动更新和内置升级入口均关闭。需要升级时由管理员重新打包和部署。
 
 ## 安装和注册
 
-1. 管理员从受控渠道获取短时、一次性的注册令牌，在被控机运行 EXE 安装程序，并确认 RustDesk 服务已启动。如果此前安装了 MSI 版，先在 Windows 的「已安装的应用」中卸载该版本，再使用 EXE 安装。
-2. 从提升权限的 **64 位 Windows PowerShell** 运行安装目录中的 `Enroll-ManagedRustDesk.ps1`，根据提示输入令牌。批量部署时可用 `-EnrollmentTokenFile <路径>` 指定由部署系统保护的 UTF-8 文件，部署方负责删除源文件。令牌允许 `A–Z a–z 0–9 . _ ~ -`，长度 16 至 4096 个字符。
-3. Windows 服务约每 30 秒同步一次。它从 RustDesk 服务进程读取设备 ID，注册设备、上传待生效凭据、设置本机永久密码，再确认激活。失败后会重试。设备注册 ID 和设备令牌在首次请求之前持久化。同一次注册重试复用原来的 ID 和令牌。
-4. 本地状态位于 `%ProgramFiles%\RustDesk-Managed-State`，目录 ACL 只向 SYSTEM 和 Administrators 授予访问权限。注册确认后，状态目录中的注册令牌文件会被删除。轮换确认后，状态中只保留设备身份、当前凭据版本和 RustDesk ID。
+1. 在被控机运行 EXE 并完成安装。安装程序启动 RustDesk 服务，服务自动向管理 API 注册。批量部署可从管理员终端运行 `--silent-install`。如果此前安装了 MSI 版，先从 Windows 的「已安装的应用」卸载 MSI 版，再使用 EXE 安装。
+2. Windows 服务首次启动时生成设备 UUID 和随机设备令牌，将它们写入本机的受保护目录，然后提交首次注册请求。管理员无需签发令牌或运行脚本。后续请求使用这个设备令牌。
+3. Windows 服务约每 30 秒同步一次。它读取本机 RustDesk ID、上传待生效凭据、设置永久密码，再确认激活。失败后自动重试。重启、断网和响应丢失时，复用原来的设备 UUID 和令牌。
+4. 本地状态位于 `%ProgramFiles%\RustDesk-Managed-State`。设备令牌只由 SYSTEM 和 Administrators 访问。轮换确认后，状态中保留设备身份、当前凭据版本和 RustDesk ID。
+5. 自动注册只建立一条未分配的设备记录。管理员仍需在自己的 API 后台核对并分配设备。安装同一 EXE 的控制端也会注册自己的设备，但员工可以先用管理账号登录并连接已经分配给自己的设备。
 
 控制端在主界面打开 **Managed devices**，登录、查看分配列表并点击处于 `ready` 状态的设备。凭据在当前连接内使用，沿用 RustDesk 已有的共享凭据路径。
 
@@ -34,7 +35,7 @@
 
 | 方法和路径 | 身份 | 请求体 | 成功响应 |
 | --- | --- | --- | --- |
-| `POST /v1/devices/enroll` | `Bearer <一次性注册令牌>` | `{"device_id":"<UUID>","device_token":"<设备令牌>"}` | `204`，空响应 |
+| `POST /v1/devices/enroll` | 首次注册，无 `Authorization` 请求头 | `{"device_id":"<UUID>","device_token":"<设备令牌>"}` | `204`，空响应 |
 | `GET /v1/devices/{deviceId}/pending-actions` | `Bearer <设备令牌>` | 无 | `200 {"minimum_version":1}` |
 | `POST /v1/devices/{deviceId}/credentials` | `Bearer <设备令牌>` | `{"key_id":"device-enrollment-v1","ciphertext":"<Base64>"}` | `204`，空响应 |
 | `POST /v1/devices/{deviceId}/credentials/{version}/activate` | `Bearer <设备令牌>` | `{"operation_id":"<UUID>"}` | `204`，空响应 |
@@ -47,8 +48,9 @@
 ### 注册与身份
 
 - `device_id` 是客户端生成的 UUID。API 使用它作为设备主键和权限关联键。RustDesk ID 用于建立远程连接，可以随凭据版本更新。
-- `device_token` 是客户端生成的 32 字节随机值，以无填充的 Base64URL 编码。API 保存其摘要，并将它限定到对应设备的三个后续接口。注册令牌只用于注册。
-- 首次注册时原子消费一次性令牌并创建记录。若第一次响应丢失，同一注册令牌、同一设备 UUID 和同一设备令牌的精确重试应返回成功。不同设备或不同设备令牌的重用应拒绝。对已成功消费一次性令牌的精确重试，保留与部署重试窗口匹配的记录。
+- `device_token` 是客户端生成的 32 字节随机值，以无填充的 Base64URL 编码。首次注册时它在 HTTPS 请求体中提交。API 保存其摘要，并将它限定到对应设备的三个后续接口。
+- 首次注册时原子创建一条未分配记录。同一 UUID 和同一令牌的重试应返回 `204`，包括首次成功响应丢失的情况。相同 UUID 搭配不同令牌时拒绝且不得覆盖原记录。先前已注册并保存了设备令牌的客户端升级后继续使用原身份。
+- 首次注册接口允许任何能访问 API 的客户端提交新设备记录。限流并校验 UUID 和令牌格式。管理员在分配前核对设备，注册本身不授予连接或员工权限。RustDesk ID 仅用于连接，不应用它自动分配设备或替换已有记录。
 - 用户登录由自定义 API 负责。建议发放短时员工访问令牌并为登录限制速率。设备令牌和员工令牌的权限分开。服务端对无效身份返回 `401`，对有效身份访问未分配设备返回 `403` 或 `404`。
 
 ### 加密、暂存与激活
@@ -81,7 +83,7 @@
 ## 验收
 
 1. 下载 Actions 生成的 EXE 安装程序，在干净的 Windows x64 测试机上安装。验证连接自建 ID 和 Relay 服务器，检查 RustDesk 版本为 1.5.3，确认关闭内置更新。
-2. 注册两台设备并分别分配给两名员工。检查同一设备注册和上报的重试不会生成重复记录，两台设备有不同的永久密码。
+2. 安装两台设备，确认服务自动注册成功后分别分配给两名员工。检查同一设备注册和上报的重试不会生成重复记录，两台设备有不同的永久密码。
 3. 验证员工能从列表一键连接自己的设备，未登录和越权请求被拒绝。分别测试 P2P 和中继，并在被控机重启后复测。
 4. 模拟 API 在设置密码后短暂不可用，再恢复服务，确认客户端重用同一操作，激活前 API 暂停发放。
 5. 验证在线和离线撤权。撤权后 API 立即拒绝原用户取凭据，确认设备轮换后旧密码无法建立新会话，且日志中没有明文密码或令牌。

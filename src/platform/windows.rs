@@ -556,6 +556,25 @@ pub fn start_os_service() {
     }
 }
 
+#[cfg(target_arch = "x86_64")]
+pub(crate) fn managed_state_directory() -> ResultType<PathBuf> {
+    use installer_handoff::directory;
+    use windows::Win32::UI::Shell::FOLDERID_ProgramFiles;
+
+    let program_files = installer_shell::get_known_folder(&FOLDERID_ProgramFiles)?;
+    if directory::has_reparse_parent(&program_files)? || !directory::supports_acls(&program_files)? {
+        bail!("Program Files cannot hold protected managed device state");
+    }
+    let path = program_files.join("RustDesk-Managed-State");
+    if !path.try_exists()? {
+        directory::create(&path)?;
+    }
+    if directory::has_reparse_parent(&path)? {
+        bail!("Managed device state directory contains a reparse point");
+    }
+    Ok(path)
+}
+
 const SERVICE_TYPE: ServiceType = ServiceType::OWN_PROCESS;
 
 extern "C" {

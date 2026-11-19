@@ -1,9 +1,4 @@
-use std::{
-    fs,
-    io::ErrorKind,
-    path::{Path, PathBuf},
-    time::Duration,
-};
+use std::{fs, io::ErrorKind, path::Path, time::Duration};
 
 use hbb_common::{
     anyhow::{anyhow, Context},
@@ -88,10 +83,7 @@ pub(crate) async fn run() {
 }
 
 async fn poll() -> ResultType<()> {
-    let directory = PathBuf::from(
-        std::env::var_os("ProgramFiles").ok_or_else(|| anyhow!("Program Files is unavailable"))?,
-    )
-    .join("RustDesk-Managed-State");
+    let directory = crate::platform::windows::managed_state_directory()?;
     let api = API_URL
         .ok_or_else(|| anyhow!("Management API URL is missing"))?
         .trim_end_matches('/');
@@ -120,13 +112,9 @@ async fn sync(
     public_key: &box_::PublicKey,
 ) -> ResultType<()> {
     let state_path = directory.join("device.json");
-    let enrollment = directory.join("enrollment.token");
     let mut device: Device = match fs::read(&state_path) {
         Ok(value) => serde_json::from_slice(&value).context("Invalid device state")?,
         Err(error) if error.kind() == ErrorKind::NotFound => {
-            if !enrollment.try_exists()? {
-                return Ok(());
-            }
             let device = Device {
                 id: Uuid::new_v4().to_string(),
                 bearer: random_secret(),
@@ -146,21 +134,13 @@ async fn sync(
         .ok_or_else(|| anyhow!("RustDesk service ID is unavailable"))?;
 
     if !device.enrolled {
-        let token = fs::read_to_string(&enrollment)?;
-        checked(
-            http.post(format!("{api}/v1/devices/enroll"))
-                .bearer_auth(token.trim())
-                .json(&json!({
-                    "device_id": device.id,
-                    "device_token": device.bearer,
-                })),
-        )
+        checked(http.post(format!("{api}/v1/devices/enroll")).json(&json!({
+            "device_id": device.id,
+            "device_token": device.bearer,
+        })))
         .await?;
         device.enrolled = true;
         save(&state_path, &device)?;
-    }
-    if enrollment.try_exists()? {
-        fs::remove_file(enrollment)?;
     }
 
     let base = format!("{api}/v1/devices/{}", device.id);

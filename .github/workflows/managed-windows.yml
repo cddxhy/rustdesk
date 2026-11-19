@@ -150,8 +150,6 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "RustDesk build failed" }
           mv ./flutter/build/windows/x64/runner/Release ./rustdesk
 
-          Copy-Item res/managed/Enroll-ManagedRustDesk.ps1 ./rustdesk/
-
           # Download usbmmidd_v2.zip and extract it to ./rustdesk
           Invoke-WebRequest -Uri https://github.com/rustdesk-org/rdev/releases/download/usbmmidd_v2/usbmmidd_v2.zip -OutFile usbmmidd_v2.zip
           Expand-Archive usbmmidd_v2.zip -DestinationPath .
@@ -218,21 +216,29 @@ jobs:
             $reader.Dispose()
           }
 
+          # Check startup without registering the disposable CI runner in the real API.
+          $installedExe = Join-Path $env:ProgramFiles 'RustDesk\rustdesk.exe'
+          New-NetFirewallRule -Name 'ManagedRustDeskCI' -DisplayName 'Isolate RustDesk CI' -Direction Outbound -Action Block -Program $installedExe | Out-Null
+          $stateFile = Join-Path $env:ProgramFiles 'RustDesk-Managed-State\device.json'
           Start-Process -FilePath $installer -ArgumentList '--silent-install'
           $uninstallKey = 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\RustDesk'
           $deadline = [DateTime]::UtcNow.AddMinutes(3)
           do {
             $registered = Get-ItemProperty -LiteralPath $uninstallKey -ErrorAction SilentlyContinue
             $service = Get-Service -Name RustDesk -ErrorAction SilentlyContinue
-            if ($registered.InstallLocation -and $service.Status -eq 'Running') { break }
+            if ($registered.InstallLocation -and $service.Status -eq 'Running' -and (Test-Path -LiteralPath $stateFile)) { break }
             Start-Sleep -Seconds 2
           } while ([DateTime]::UtcNow -lt $deadline)
           if ($registered.DisplayVersion -ne $env:VERSION -or $service.Status -ne 'Running') {
             throw 'Pinned RustDesk version or running service was not found after installation'
           }
-          $installedScript = Join-Path $registered.InstallLocation 'Enroll-ManagedRustDesk.ps1'
-          if ((Get-FileHash $installedScript).Hash -ne (Get-FileHash res/managed/Enroll-ManagedRustDesk.ps1).Hash) {
-            throw 'The installed enrollment script does not match the payload'
+          $state = Get-Content -LiteralPath $stateFile -Raw | ConvertFrom-Json
+          $deviceId = [Guid]::Empty
+          if (![Guid]::TryParse($state.id, [ref]$deviceId) -or $state.bearer -cnotmatch '^[A-Za-z0-9_-]{43}$' -or $state.enrolled) {
+            throw 'The isolated managed service did not initialize device identity automatically'
+          }
+          if (!(Get-Acl -LiteralPath (Split-Path -Parent $stateFile)).AreAccessRulesProtected) {
+            throw 'Managed device state must not inherit Program Files permissions'
           }
 
       - name: Upload Windows x64 EXE installer
