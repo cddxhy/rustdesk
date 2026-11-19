@@ -241,6 +241,19 @@ jobs:
             throw 'Managed device state must not inherit Program Files permissions'
           }
 
+      - name: Verify temporary stop preserves automatic startup
+        run: |
+          $installedExe = Join-Path $env:ProgramFiles 'RustDesk\rustdesk.exe'
+          $trayShortcut = Join-Path $env:ProgramData 'Microsoft\Windows\Start Menu\Programs\Startup\RustDesk Tray.lnk'
+          $stop = Start-Process -FilePath $installedExe -ArgumentList '--service-control','stop','RustDesk' -Wait -PassThru
+          if ($stop.ExitCode -ne 0) { throw "Stop command failed ($($stop.ExitCode))" }
+          $service = Get-Service -Name RustDesk
+          if ($service.Status -ne 'Stopped' -or $service.StartType -ne 'Automatic' -or !(Test-Path -LiteralPath $trayShortcut)) {
+            throw 'Temporary stop must keep the service registered for automatic startup and preserve the tray shortcut'
+          }
+          Start-Service -Name RustDesk
+          $service.WaitForStatus('Running', [TimeSpan]::FromSeconds(30))
+
       - name: Upload Windows x64 EXE installer
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:

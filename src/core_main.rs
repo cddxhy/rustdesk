@@ -370,6 +370,12 @@ pub fn core_main() -> Option<CoreMainAction> {
                 return None;
             }
         } else if args[0] == "--tray" {
+            #[cfg(all(windows, target_arch = "x86_64"))]
+            if crate::managed_deployment::uses_installed_service()
+                && !crate::platform::is_self_service_running()
+            {
+                return None;
+            }
             if !crate::check_process("--tray", true) {
                 crate::tray::start_tray();
             }

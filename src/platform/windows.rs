@@ -3388,8 +3388,23 @@ pub fn try_lock_tray_single_instance() -> bool {
 }
 
 /// Returns `true` on failure or cancellation so the caller keeps running.
-/// Successful removal exits this process instead of returning.
-pub fn uninstall_service(show_new_window: bool, _: bool) -> bool {
+/// Successful removal exits this process. A managed temporary stop returns `false`.
+pub fn uninstall_service(show_new_window: bool, permanent: bool) -> bool {
+    #[cfg(target_arch = "x86_64")]
+    if !permanent && crate::managed_deployment::uses_installed_service() {
+        let (_, _, _, exe) = get_install_info();
+        return match service_control_command("stop", &exe, false)
+            .and_then(|command| run_cmds(command, false, "stop-service"))
+        {
+            Ok(()) => false,
+            Err(error) => {
+                log::error!("Failed to stop the managed service: {error}");
+                true
+            }
+        };
+    }
+    #[cfg(not(target_arch = "x86_64"))]
+    let _ = permanent;
     log::info!("Uninstalling service...");
     if is_self_service_running() {
         // UI/tray/CLI callers are synchronous. Refresh the file before killing its source.
@@ -4069,6 +4084,7 @@ fn service_control_command(operation: &str, exe: &str, installed_now: bool) -> R
     let legacy = match operation {
         "create-service" | "create-service-with-rollback" => get_create_service(exe),
         "remove" => format!("sc stop {app_name}\r\nsc delete {app_name}"),
+        "stop" => format!("sc stop {app_name}"),
         _ => bail!("Unsupported service operation: {operation}"),
     };
     if legacy.is_empty() || (is_create && Config::get_option("stop-service") == "Y") {

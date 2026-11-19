@@ -23,6 +23,10 @@ pub(crate) fn enabled() -> bool {
     option_env!("RUSTDESK_MANAGED_BUILD") == Some("1")
 }
 
+pub(crate) fn uses_installed_service() -> bool {
+    enabled() && crate::platform::is_installed()
+}
+
 pub(crate) fn relay_server() -> &'static str {
     option_env!("RUSTDESK_RELAY_SERVER").unwrap_or_default()
 }

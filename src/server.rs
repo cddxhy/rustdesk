@@ -773,6 +773,15 @@ pub async fn start_server(is_server: bool, no_server: bool) {
             }
             Err(err) => {
                 log::info!("server not started: {err:?}, no_server: {no_server}");
+                #[cfg(all(windows, target_arch = "x86_64"))]
+                if crate::managed_deployment::uses_installed_service() {
+                    // A GUI host would resume incoming connections after a temporary stop.
+                    if crate::platform::is_self_service_running() {
+                        hbb_common::sleep(1.0).await;
+                        std::thread::spawn(|| start_server(false, true));
+                    }
+                    return;
+                }
                 if no_server {
                     hbb_common::sleep(1.0).await;
                     std::thread::spawn(|| start_server(false, true));

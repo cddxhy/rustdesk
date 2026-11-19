@@ -175,6 +175,14 @@ pub fn refresh_options() {
 
 #[inline]
 pub fn get_option<T: AsRef<str>>(key: T) -> String {
+    #[cfg(all(windows, target_arch = "x86_64"))]
+    if key.as_ref() == "stop-service" && crate::managed_deployment::uses_installed_service() {
+        return if crate::platform::is_self_service_running() {
+            String::new()
+        } else {
+            "Y".to_owned()
+        };
+    }
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
         let map = OPTIONS.lock().unwrap();

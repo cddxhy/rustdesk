@@ -82,6 +82,18 @@ inline DWORD RemoveService(const wchar_t* name) {
   return error == ERROR_SERVICE_MARKED_FOR_DELETE ? ERROR_SUCCESS : error;
 }
 
+inline DWORD StopRegisteredService(const wchar_t* name) {
+  ServiceHandle manager(OpenSCManagerW(nullptr, nullptr, SC_MANAGER_CONNECT),
+                        CloseServiceHandle);
+  if (!manager) {
+    return GetLastError();
+  }
+  ServiceHandle service(
+      OpenServiceW(manager.get(), name, SERVICE_STOP | SERVICE_QUERY_STATUS),
+      CloseServiceHandle);
+  return service ? StopService(service.get()) : GetLastError();
+}
+
 inline DWORD InstallService(const wchar_t* name, const wchar_t* executable,
                             bool rollback_on_failure) {
   if (!*executable || wcschr(executable, L'"')) {
@@ -130,9 +142,9 @@ inline DWORD InstallService(const wchar_t* name, const wchar_t* executable,
 }
 
 inline DWORD RunCommand(int count, wchar_t** args) {
-  constexpr int kRemoveArgumentCount = 4;
+  constexpr int kServiceArgumentCount = 4;
   constexpr int kInstallArgumentCount = 5;
-  if (count < kRemoveArgumentCount) {
+  if (count < kServiceArgumentCount) {
     return ERROR_BAD_ARGUMENTS;
   }
   if (!*args[3]) {
@@ -144,8 +156,11 @@ inline DWORD RunCommand(int count, wchar_t** args) {
       count == kInstallArgumentCount) {
     return InstallService(args[3], args[4], rollback_on_failure);
   }
-  if (operation == L"remove" && count == kRemoveArgumentCount) {
+  if (operation == L"remove" && count == kServiceArgumentCount) {
     return RemoveService(args[3]);
+  }
+  if (operation == L"stop" && count == kServiceArgumentCount) {
+    return StopRegisteredService(args[3]);
   }
   return ERROR_BAD_ARGUMENTS;
 }

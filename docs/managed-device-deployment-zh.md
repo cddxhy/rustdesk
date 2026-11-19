@@ -29,6 +29,8 @@
 
 控制端在主界面打开 **Managed devices**，登录、查看分配列表并点击处于 `ready` 状态的设备。凭据在当前连接内使用，沿用 RustDesk 已有的共享凭据路径。
 
+托盘或设置里的「停止服务」只停止本次运行。Windows 保留 RustDesk 服务的自动启动类型和托盘开机启动项。电脑下次开机时，后台远控与管理 API 同步自动恢复。也可以在本次开机期间打开 RustDesk 并点击「启动服务」。
+
 ## HTTP 接口
 
 设备端和控制端调用以下接口。除注明空请求体的接口外，POST 请求使用 `Content-Type: application/json`。所有地址均相对于 `MANAGEMENT_API_URL`。服务器应使用有效的 HTTPS 证书，直接响应各接口。
