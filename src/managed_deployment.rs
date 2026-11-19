@@ -181,7 +181,7 @@ async fn wait_for_rustdesk_id() -> String {
         match crate::ipc::get_config_async("id", 1_000).await {
             Ok(Some(id)) if !id.is_empty() => return id,
             result => hbb_common::throttled_log!(
-                30,
+                STARTUP_DELAY,
                 debug,
                 "Waiting for the trusted RustDesk server before management sync: {:?}",
                 result.err()
